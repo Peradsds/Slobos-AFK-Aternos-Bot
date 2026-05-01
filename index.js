@@ -1061,18 +1061,11 @@ app.post("/command", express.json(), (req, res) => {
 //                    END OF WEB TOOLS
 //============================================================
 
-// FIX: handle port conflict gracefully - try next port if taken
 const server = app.listen(PORT, "0.0.0.0", () => {
-  addLog(`[Server] HTTP server started on port ${server.address().port} `);
+  addLog(`[Server] HTTP server started on port ${PORT}`);
 });
 server.on("error", (err) => {
-  if (err.code === "EADDRINUSE") {
-    const fallbackPort = PORT + 1;
-    addLog(`[Server] Port ${PORT} in use - trying port ${fallbackPort} `);
-    server.listen(fallbackPort, "0.0.0.0");
-  } else {
-    addLog(`[Server] HTTP server error: ${err.message} `);
-  }
+  addLog(`[Server] HTTP server error: ${err.message}`);
 });
 
 // FIX: only one definition of formatUptime
