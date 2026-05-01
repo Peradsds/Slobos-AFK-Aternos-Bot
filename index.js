@@ -137,6 +137,33 @@ app.get('/', (req, res) => {
 
           footer { margin-top: 20px; text-align: center; }
           footer p { font-size: 12px; color: #484f58; margin: 0; }
+
+          .settings-card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-bottom: 10px;
+          }
+          .settings-card h3 {
+            font-size: 13px; font-weight: 600; color: #8b949e;
+            margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.5px;
+          }
+          .settings-row { display: grid; grid-template-columns: 1fr 100px; gap: 8px; margin-bottom: 8px; }
+          .settings-input {
+            background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+            color: #e6edf3; font-size: 14px; font-family: inherit;
+            padding: 8px 12px; width: 100%;
+          }
+          .settings-input:focus { outline: none; border-color: #388bfd; }
+          .btn-save {
+            background: #1f6feb; border: none; border-radius: 8px;
+            color: #fff; font-size: 13px; font-weight: 600;
+            cursor: pointer; font-family: inherit; padding: 8px 12px;
+            transition: opacity 0.2s;
+          }
+          .btn-save:hover { opacity: 0.85; }
+          #save-msg { font-size: 12px; color: #3fb950; margin-top: 6px; min-height: 16px; }
         </style>
       </head>
       <body>
@@ -189,6 +216,18 @@ app.get('/', (req, res) => {
             <div class="btn-grid btn-grid-2">
               <a href="/tutorial" class="btn-secondary" aria-label="View setup guide">Setup guide</a>
               <a href="/logs" class="btn-secondary" aria-label="View bot logs">View logs</a>
+            </div>
+          </section>
+
+          <section aria-label="Server settings">
+            <div class="settings-card">
+              <h3>Server Settings</h3>
+              <div class="settings-row">
+                <input id="inp-ip" class="settings-input" type="text" placeholder="Server IP" value="${config.server.ip}" aria-label="Server IP" />
+                <input id="inp-port" class="settings-input" type="number" placeholder="Port" value="${config.server.port}" aria-label="Server Port" />
+              </div>
+              <button class="btn-save" onclick="saveServer()">Save &amp; Reconnect</button>
+              <div id="save-msg"></div>
             </div>
           </section>
 
@@ -255,6 +294,30 @@ app.get('/', (req, res) => {
             const data = await r.json();
             alert(data.success ? 'Bot stopped!' : data.msg);
             update();
+          }
+
+          async function saveServer() {
+            const ip = document.getElementById('inp-ip').value.trim();
+            const port = parseInt(document.getElementById('inp-port').value.trim(), 10);
+            const msg = document.getElementById('save-msg');
+            if (!ip || !port) { msg.style.color='#f85149'; msg.textContent='Please enter a valid IP and port.'; return; }
+            msg.style.color='#8b949e'; msg.textContent='Saving…';
+            try {
+              const r = await fetch('/api/update-server', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip, port })
+              });
+              const data = await r.json();
+              if (data.success) {
+                msg.style.color='#3fb950'; msg.textContent='Saved! Reconnecting to ' + ip + ':' + port;
+                setTimeout(update, 2000);
+              } else {
+                msg.style.color='#f85149'; msg.textContent='Error: ' + data.msg;
+              }
+            } catch(e) {
+              msg.style.color='#f85149'; msg.textContent='Request failed.';
+            }
           }
 
           setInterval(update, 5000);
@@ -975,6 +1038,30 @@ app.get("/logs", (req, res) => {
 
 let botRunning = true;
 
+app.post("/api/update-server", (req, res) => {
+  const { ip, port } = req.body || {};
+  if (!ip || !port || isNaN(parseInt(port))) {
+    return res.json({ success: false, msg: "Invalid IP or port." });
+  }
+  config.server.ip = ip.trim();
+  config.server.port = parseInt(port, 10);
+  addLog(`[Settings] Server updated to ${config.server.ip}:${config.server.port}`);
+
+  // Stop current bot and reconnect
+  clearAllIntervals();
+  botState.connected = false;
+  botState.reconnectAttempts = 0;
+  isReconnecting = false;
+  if (bot) {
+    try { bot.removeAllListeners(); bot.end(); } catch (_) {}
+    bot = null;
+  }
+  clearBotTimeouts();
+  setTimeout(() => createBot(), 1000);
+
+  res.json({ success: true });
+});
+
 app.post("/start", (req, res) => {
   if (botRunning) return res.json({ success: false, msg: "Already running" });
 
@@ -1352,6 +1439,10 @@ function createBot() {
       const msg = err.message || "";
       addLog(`[Bot] Error: ${msg}`);
       botState.errors.push({ type: "error", message: msg, time: Date.now() });
+      // Reset backoff for transient network errors so reconnect is fast
+      if (msg.includes("ECONNRESET") || msg.includes("ETIMEDOUT") || msg.includes("EPIPE")) {
+        botState.reconnectAttempts = 0;
+      }
       // Don't reconnect on error - let 'end' event handle it
     });
   } catch (err) {
