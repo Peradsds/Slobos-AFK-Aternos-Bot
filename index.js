@@ -164,6 +164,7 @@ app.get('/', (req, res) => {
           }
           .btn-save:hover { opacity: 0.85; }
           #save-msg { font-size: 12px; color: #3fb950; margin-top: 6px; min-height: 16px; }
+          .btn-reset { border: 2px solid #9e6a03; background: #271c00; color: #d29922; }
         </style>
       </head>
       <body>
@@ -216,6 +217,9 @@ app.get('/', (req, res) => {
             <div class="btn-grid btn-grid-2">
               <a href="/tutorial" class="btn-secondary" aria-label="View setup guide">Setup guide</a>
               <a href="/logs" class="btn-secondary" aria-label="View bot logs">View logs</a>
+            </div>
+            <div class="btn-grid">
+              <button class="btn-primary btn-reset" onclick="fullReset()" aria-label="Full reset">Full Reset</button>
             </div>
           </section>
 
@@ -294,6 +298,25 @@ app.get('/', (req, res) => {
             const data = await r.json();
             alert(data.success ? 'Bot stopped!' : data.msg);
             update();
+          }
+
+          async function fullReset() {
+            if (!confirm('This will stop the bot, clear all state, and reconnect fresh. Continue?')) return;
+            const btn = document.querySelector('.btn-reset');
+            btn.textContent = 'Resetting…';
+            btn.disabled = true;
+            try {
+              const r = await fetch('/api/reset', { method: 'POST' });
+              const data = await r.json();
+              if (data.success) {
+                btn.textContent = 'Reset!';
+                setTimeout(() => { btn.textContent = 'Full Reset'; btn.disabled = false; update(); }, 3000);
+              } else {
+                btn.textContent = 'Failed'; btn.disabled = false;
+              }
+            } catch(e) {
+              btn.textContent = 'Full Reset'; btn.disabled = false;
+            }
           }
 
           async function saveServer() {
@@ -1037,6 +1060,26 @@ app.get("/logs", (req, res) => {
 });
 
 let botRunning = true;
+
+app.post("/api/reset", (req, res) => {
+  addLog("[Control] Full reset triggered from dashboard");
+  clearAllIntervals();
+  botState.connected = false;
+  botState.reconnectAttempts = 0;
+  botState.errors = [];
+  botState.startTime = Date.now();
+  botState.lastActivity = Date.now();
+  botState.wasThrottled = false;
+  isReconnecting = false;
+  botRunning = true;
+  if (bot) {
+    try { bot.removeAllListeners(); bot.end(); } catch (_) {}
+    bot = null;
+  }
+  clearBotTimeouts();
+  setTimeout(() => createBot(), 500);
+  res.json({ success: true });
+});
 
 app.post("/api/update-server", (req, res) => {
   const { ip, port } = req.body || {};
